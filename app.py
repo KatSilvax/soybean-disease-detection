@@ -1,130 +1,131 @@
-# ==============================================================================
-#   app.py
-#
-#   Backend do projeto AgroIntelliVision, implementado com Flask.
-#   Responsável por receber imagens de folhas de soja, processá-las
-#   e utilizar um modelo de machine learning para prever doenças.
-#
-#   Autor: Baseado no repositório de Katcilane Silva de Souza
-#   Ajustes de integração: Gemini (Google)
-# ==============================================================================
-
-from flask import Flask, request, jsonify
-from flask_cors import CORS  # Importa o CORS para permitir a comunicação entre domínios
-from tensorflow.keras.models import load_model
+# Importação das bibliotecas necessárias
+from flask import Flask, request, jsonify, render_template_string
+from flask_cors import CORS
+import tensorflow as tf
 import numpy as np
 from PIL import Image
 import io
 import os
 
-# ==============================================================================
-#   Caminho para o modelo
-# ==============================================================================
-MODEL_PATH = os.path.join('models', 'saved_models', 'modelo_soja.h5')
-
-# --- Carregamento do Modelo de Machine Learning ---
-try:
-    # Verifica se o ficheiro do modelo existe antes de tentar carregá-lo
-    if not os.path.exists(MODEL_PATH):
-        raise FileNotFoundError(f"O ficheiro do modelo '{MODEL_PATH}' não foi encontrado. Certifique-se de que está na pasta correta.")
-    
-    model = load_model(MODEL_PATH)
-    print(">>> Modelo carregado com sucesso!")
-    model.summary()  # Exibe um resumo da arquitetura do modelo no terminal
-except Exception as e:
-    print(f"!!! Erro fatal ao carregar o modelo: {e}")
-    model = None # Garante que o modelo é None se o carregamento falhar
-
-# ==============================================================================
-#   REATORAÇÃO: A lista de classes foi reduzida para focar nas doenças mais
-#   recorrentes no Brasil, tornando o modelo mais específico e prático.
-# ==============================================================================
-# --- Nomes das Classes ---
-# ATENÇÃO: O seu modelo de IA (`modelo_soja.h5`) precisa ser treinado novamente
-# com exatamente estas 8 classes e nesta mesma ordem para que o código funcione
-# corretamente. Se o modelo atual espera 16 saídas, ele será incompatível.
-class_names = [
-    'Ferrugem Asiática',                # Classe 0
-    'Mancha Alvo',                      # Classe 1
-    'Oídio',                            # Classe 2
-    'Mancha Olho-de-Rã',                # Classe 3
-    'Míldio',                           # Classe 4
-    'Crestamento Foliar de Cercospora', # Classe 5
-    'Antracnose',                       # Classe 6
-    'Folha Saudável'                    # Classe 7
-]
-
-
-def preprocess_image(image_bytes, target_size=(64, 64)):
-    """
-    Pré-processa a imagem recebida para o formato que o modelo espera.
-    """
-    image = Image.open(io.BytesIO(image_bytes))
-    if image.mode != 'RGB':
-        image = image.convert('RGB')
-    image = image.resize(target_size)
-    image_array = np.asarray(image)
-    image_array = image_array / 255.0  # Normalizar pixels
-    image_array = np.expand_dims(image_array, axis=0)
-    return image_array
-
-# --- Configuração da Aplicação Flask ---
+# Inicialização da aplicação Flask e configuração do CORS
 app = Flask(__name__)
-# Habilita o CORS para permitir que o seu frontend (index.html) se comunique com este backend
 CORS(app)
 
-# --- Rota da API para Predição ---
+# Carregar modelo
+# Configuração do modelo
+MODEL_PATH = 'models/saved_models/modelo_soja.h5'
+model = None
+
+# Classes das doenças
+# Lista de classes/doenças que o modelo pode identificar
+CLASSES = [
+    'antracnose', 'crestamento_bacteriano', 'deficiencia_de_potassio',
+    'ferrugem_asiatica', 'ferrugem_do_feijao', 'mancha_alvo',
+    'mancha_angular', 'mancha_olho_de_ra', 'mancha_parda',
+    'mildio', 'oidio', 'podridao_radicular', 'saudavel',
+    'sindrome_morte_subita', 'virus_mosaico'
+]
+
+def load_model():
+    """
+    Carrega o modelo de deep learning salvo no caminho especificado
+    Utiliza variável global para manter o modelo em memória
+    """
+    global model
+    if os.path.exists(MODEL_PATH):
+        model = tf.keras.models.load_model(MODEL_PATH)
+        print("Modelo carregado com sucesso!")
+    else:
+        print("Modelo não encontrado. Execute o treinamento primeiro.")
+
+def preprocess_image(image):
+    """
+    Prepara a imagem para ser processada pelo modelo:
+    1. Redimensiona para 64x64 pixels
+    2. Normaliza os valores dos pixels para o intervalo [0,1]
+    3. Adiciona uma dimensão para batch
+    """
+    image = image.resize((64, 64))
+    image = np.array(image) / 255.0
+    image = np.expand_dims(image, axis=0)
+    return image
+
+@app.route('/')
+def index():
+    """
+    Rota principal que renderiza a página HTML da interface
+    """
+    with open('index.html', 'r', encoding='utf-8') as f:
+        return f.read()
+
 @app.route('/predict', methods=['POST'])
 def predict():
     """
-    Endpoint da API que recebe um ficheiro de imagem e retorna um diagnóstico.
+    Endpoint para receber imagens e realizar predições
+    Retorna a classe predita e o nível de confiança da predição
     """
-    if model is None:
-        return jsonify({'error': 'O modelo de machine learning não foi carregado corretamente no servidor.'}), 500
-
-    if 'file' not in request.files:
-        return jsonify({'error': 'Nenhum ficheiro foi enviado na requisição.'}), 400
-
-    file = request.files['file']
-
-    if file.filename == '':
-        return jsonify({'error': 'Ficheiro inválido ou sem nome.'}), 400
-
     try:
-        # Lê os bytes da imagem e pré-processa
-        image_bytes = file.read()
-        processed_image = preprocess_image(image_bytes)
+        print("→ Recebendo requisição")
         
-        # Realiza a predição com o modelo
-        prediction = model.predict(processed_image)
+        # Verifica se o modelo está carregado
+        if model is None:
+            print("✗ Modelo não carregado")
+            return jsonify({'error': 'Modelo não carregado'}), 500
         
-        # Obtém o índice da classe com maior probabilidade e a confiança
-        predicted_class_index = np.argmax(prediction[0])
-        confidence = float(np.max(prediction[0]))
+        # Validação do arquivo recebido
+        if 'file' not in request.files:
+            print("✗ Arquivo não encontrado")
+            return jsonify({'error': 'Nenhum arquivo enviado'}), 400
         
-        # Mapeia o índice para o nome da classe
-        if predicted_class_index < len(class_names):
-            predicted_class_name = class_names[predicted_class_index]
+        file = request.files['file']
+        if file.filename == '':
+            print("✗ Nome do arquivo vazio")
+            return jsonify({'error': 'Nenhum arquivo selecionado'}), 400
+        
+        print(f"→ Processando: {file.filename}")
+        
+        # Processar imagem
+        # Processamento da imagem
+        image = Image.open(io.BytesIO(file.read()))
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        
+        processed_image = preprocess_image(image)
+        print(f"→ Imagem processada: {processed_image.shape}")
+        
+        # Fazer predição
+        # Realização da predição
+        predictions = model.predict(processed_image, verbose=0)
+        predicted_class = np.argmax(predictions[0])
+        confidence = float(predictions[0][predicted_class])
+        
+        print(f"→ Predição: classe {predicted_class}, confiança {confidence:.2f}")
+        
+        # Mapear para nome da classe
+        # Formatação do resultado
+        if predicted_class < len(CLASSES):
+            class_name = CLASSES[predicted_class]
+            if class_name == 'saudavel':
+                class_name = 'Folha Saudável'
+            else:
+                class_name = class_name.replace('_', ' ').title()
         else:
-            predicted_class_name = 'Classe Desconhecida'
-
-        # Retorna o resultado em formato JSON
+            class_name = 'Desconhecido'
+        
+        print(f"✓ Resultado: {class_name}")
+        
         return jsonify({
-            'prediction': predicted_class_name,
+            'prediction': class_name,
             'confidence': confidence
         })
-
+    
     except Exception as e:
-        # Retorna um erro genérico se algo falhar durante o processo
-        print(f"!!! Erro durante a predição: {e}")
-        return jsonify({'error': f'Ocorreu um erro interno no servidor: {e}'}), 500
+        print(f"✗ ERRO: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
-# ==============================================================================
-#   Ponto de Entrada da Aplicação
-# ==============================================================================
+# Inicialização da aplicação
 if __name__ == '__main__':
-    # app.run() inicia o servidor.
-    # host='0.0.0.0' torna o servidor acessível na sua rede local.
-    # port=5000 define a porta.
-    # debug=True fornece mais detalhes sobre erros no terminal durante o desenvolvimento.
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    load_model()
+    app.run(debug=True, host='127.0.0.1', port=5000)
