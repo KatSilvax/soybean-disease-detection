@@ -14,6 +14,7 @@ import numpy as np
 from PIL import Image
 import io
 import os
+import h5py
 import logging
 
 # Configuração de logging
@@ -37,6 +38,23 @@ CLASSES = [
     'saudavel', 'classe_14', 'classe_15'
 ]
 
+def build_model_from_scratch():
+    """Constrói o modelo manualmente baseado na arquitetura."""
+    model = tf.keras.Sequential([
+        tf.keras.layers.Input(shape=(64, 64, 3)),
+        tf.keras.layers.Conv2D(32, (3, 3), activation='relu'),
+        tf.keras.layers.MaxPooling2D((2, 2)),
+        tf.keras.layers.Conv2D(32, (3, 3), activation='relu'),
+        tf.keras.layers.MaxPooling2D((2, 2)),
+        tf.keras.layers.Conv2D(32, (3, 3), activation='relu'),
+        tf.keras.layers.MaxPooling2D((2, 2)),
+        tf.keras.layers.Flatten(),
+        tf.keras.layers.Dense(581, activation='relu'),
+        tf.keras.layers.Dense(581, activation='relu'),
+        tf.keras.layers.Dense(16, activation='softmax')
+    ])
+    return model
+
 def load_model():
     """Carrega o modelo de deep learning salvo.
     
@@ -46,7 +64,18 @@ def load_model():
     global model
     try:
         if os.path.exists(MODEL_PATH):
-            model = tf.keras.models.load_model(MODEL_PATH)
+            logger.info("Construindo modelo...")
+            model = build_model_from_scratch()
+            
+            logger.info("Carregando pesos...")
+            model.load_weights(MODEL_PATH)
+            
+            logger.info("Compilando modelo...")
+            model.compile(
+                optimizer='adam',
+                loss='categorical_crossentropy',
+                metrics=['accuracy']
+            )
             logger.info("Modelo carregado com sucesso!")
             return True
         else:
@@ -176,8 +205,9 @@ if __name__ == '__main__':
     logger.info("Iniciando AgroIntelliVision...")
     
     if load_model():
-        logger.info("Servidor iniciado em http://127.0.0.1:5000")
-        app.run(debug=True, host='127.0.0.1', port=5000)
+        port = int(os.environ.get('PORT', 5000))
+        logger.info(f"Servidor iniciado na porta {port}")
+        app.run(debug=False, host='0.0.0.0', port=port)
     else:
         logger.error("Falha ao carregar o modelo. Verifique se o arquivo existe.")
         exit(1)

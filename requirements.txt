@@ -1,21 +1,6 @@
-# AgroIntelliVision - Dependências Python
-# Versões testadas e compatíveis
-
-# Framework Web
 flask==3.0.0
 flask-cors==4.0.0
-
-# Machine Learning e Processamento
 tensorflow==2.19.0
 numpy==2.1.3
 pillow==11.1.0
-
-# Utilitários (opcionais para desenvolvimento)
-matplotlib>=3.5.0
-seaborn>=0.11.0
-
-# Desenvolvimento e Testes (descomente se necessário)
-# pytest>=7.0.0
-# pytest-cov>=4.0.0
-# black>=22.0.0
-# flake8>=5.0.0
+gunicorn==21.2.0
